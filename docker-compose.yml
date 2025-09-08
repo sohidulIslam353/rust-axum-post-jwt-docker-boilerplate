@@ -1,0 +1,63 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: axum_app
+    volumes:
+      - ./src:/usr/src/app/src
+      - ./Cargo.toml:/usr/src/app/Cargo.toml
+      - ./Cargo.lock:/usr/src/app/Cargo.lock
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+      - keydb
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/axum_db
+      REDIS_URL: "redis://keydb:6379/"
+
+  db:
+    image: postgres:15
+    container_name: axum_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: axum_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  migration:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: axum_migration
+    volumes:
+      - ./migration:/usr/src/app/migration
+      - ./Cargo.toml:/usr/src/app/Cargo.toml
+      - ./Cargo.lock:/usr/src/app/Cargo.lock
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/axum_db
+    command: sh -c "sea-orm-cli migrate up --migration-dir ./migration"
+
+  keydb:
+    image: eqalpha/keydb:latest
+    container_name: axum_keydb
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - keydb_data:/data
+    environment:
+      - KEYDB_PASSWORD=password
+
+volumes:
+  db_data:
+  keydb_data:

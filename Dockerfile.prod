@@ -1,0 +1,27 @@
+# Stage 1: Builder
+FROM rust:trixie as builder
+
+WORKDIR /usr/src/app
+
+# Copy manifest first (for caching deps)
+COPY Cargo.toml Cargo.lock ./
+
+# Copy source
+COPY src ./src
+
+# Build release
+RUN cargo build --release
+
+# Stage 2: Runtime (minimal image)
+FROM debian:bookworm-slim   
+
+WORKDIR /usr/local/bin
+
+# Install only necessary libraries (for Rust std lib)
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/src/app/target/release/axum_seaorm_app .
+
+EXPOSE 8080
+
+CMD ["./axum_seaorm_app"]

@@ -1,0 +1,47 @@
+# ---------------------------
+# Stage 1: Builder
+# ---------------------------
+FROM rust:trixie as builder
+
+WORKDIR /usr/src/app
+
+# Copy manifest first for dependency caching
+COPY Cargo.toml Cargo.lock ./
+
+# Copy source code
+COPY src ./src
+
+# Build release binary
+RUN cargo build --release
+
+# ---------------------------
+# Stage 2: Runtime
+# ---------------------------
+FROM debian:bookworm-slim
+
+# Create non-root user
+RUN useradd -m appuser
+
+WORKDIR /usr/local/bin
+
+# Install necessary libraries (e.g., ca-certificates for HTTPS)
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Copy the release binary from builder stage
+COPY --from=builder /usr/src/app/target/release/axum_seaorm_app .
+
+# Optional: strip binary to reduce size
+RUN strip axum_seaorm_app
+
+# Set non-root user
+USER appuser
+
+# Set environment variables (can override with Docker Compose or CLI)
+ENV RUST_LOG=info
+ENV DATABASE_URL=postgres://postgres:password@postgres:5432/axum_db
+
+# Expose application port
+EXPOSE 8080
+
+# Run the app
+CMD ["./axum_seaorm_app"]

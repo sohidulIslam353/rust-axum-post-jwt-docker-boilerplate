@@ -1,0 +1,60 @@
+Axum SeaORM Boilerplate
+
+A fully dockerized Rust web application boilerplate built on Axum and SeaORM, with PostgreSQL support. This project provides a clean structure for building REST APIs, admin panels, and modular route management.
+
+🚀 Features
+
+Axum – Minimal and ergonomic Rust web framework for building APIs and web apps.
+SeaORM – Async ORM for Rust with full PostgreSQL support.
+SQLx – For low-level SQL queries if needed.
+PostgreSQL – Relational database used for persistence.
+Tokio – Async runtime for handling concurrent requests.
+Serde & Serde JSON – Serialization and deserialization for request and response bodies.
+Dotenvy – Load environment variables from .env files.
+Dockerized – Ready-to-run Docker setup with Postgres database.
+JWT - Token based authentication system
+KeyDB - Caching management
+
+⚡ Getting Started
+1. Clone the repository
+
+git clone https://github.com/sohidulislam353/axum_seaorm_boilerplate.git
+cd axum_seaorm_boilerplate
+
+2. Configure environment variables
+
+Create a .env file at the root:
+DATABASE_URL=postgres://postgres:password@localhost:5432/axum_db
+RUST_LOG=debug
+
+DATABASE_URL follows the standard PostgreSQL connection string format:
+postgres://username:password@host:port/database_name
+
+3. Run with Docker
+
+This project comes with a Docker setup for both the app and PostgreSQL.
+
+Build and start containers:
+docker compose up --build
+
+Stop containers:
+docker compose down
+
+4. Run locally (without Docker)
+=> Install Rust
+=> open your terminal run [cargo run]
+
+📌 Features to Extend
+
+Admin panel with authentication middleware
+Customer routes and APIs
+CRUD operations for resources like categories, products, etc.
+JWT or session-based auth integration
+Middleware support for role-based access
+
+💡 Notes
+
+This boilerplate is designed for learning, fast prototyping, or building scalable Rust web apps.
+Fully modular structure to allow extending controllers, routes, and middleware easily.
+Docker ensures consistent development and production environments.
+PostgreSQL is used as the primary database, making it suitable for production-ready applications.
