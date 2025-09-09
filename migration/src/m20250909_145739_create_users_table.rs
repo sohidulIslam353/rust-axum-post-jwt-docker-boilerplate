@@ -9,41 +9,34 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(Category::Table)
+                    .table(User::Table)
                     .if_not_exists()
-                    // Primary key with auto increment
                     .col(
-                        ColumnDef::new(Category::Id)
+                        ColumnDef::new(User::Id)
                             .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
-                    // Category name
-                    .col(ColumnDef::new(Category::Name).string().not_null())
-                    // Slug (unique)
+                    .col(ColumnDef::new(User::Name).string().not_null())
+                    .col(ColumnDef::new(User::Email).string().not_null().unique_key())
+                    .col(ColumnDef::new(User::EmailVerifiedAt).timestamp().null())
+                    .col(ColumnDef::new(User::Password).string().not_null())
                     .col(
-                        ColumnDef::new(Category::Slug)
+                        ColumnDef::new(User::Role)
                             .string()
                             .not_null()
-                            .unique_key(),
-                    )
-                    // Status (Active/Inactive)
-                    .col(
-                        ColumnDef::new(Category::Status)
-                            .string()
-                            .not_null()
-                            .default("Active"),
+                            .default("User"),
                     )
                     // Optional: created_at & updated_at timestamps
                     .col(
-                        ColumnDef::new(Category::CreatedAt)
+                        ColumnDef::new(User::CreatedAt)
                             .timestamp()
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
                     .col(
-                        ColumnDef::new(Category::UpdatedAt)
+                        ColumnDef::new(User::UpdatedAt)
                             .timestamp()
                             .not_null()
                             .default(Expr::current_timestamp()),
@@ -55,18 +48,21 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Category::Table).to_owned())
+            .drop_table(Table::drop().table(User::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum Category {
+// #[sea_orm(iden = "users")]
+enum User {
     Table,
     Id,
     Name,
-    Slug,
-    Status,
+    Email,
+    EmailVerifiedAt,
+    Password,
+    Role,
     CreatedAt,
     UpdatedAt,
 }

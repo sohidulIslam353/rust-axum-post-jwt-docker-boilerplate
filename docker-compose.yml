@@ -12,12 +12,14 @@ services:
       - ./Cargo.lock:/usr/src/app/Cargo.lock
     ports:
       - "8080:8080"
+    env_file:
+      - ./.env
     depends_on:
       - db
       - keydb
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/axum_db
-      REDIS_URL: "redis://keydb:6379/"
+      REDIS_URL: "redis://:password@keydb:6379/"
 
   db:
     image: postgres:15
