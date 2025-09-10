@@ -12,7 +12,8 @@ static DECODING_KEY: OnceCell<DecodingKey> = OnceCell::new();
 /// JWT claims struct
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JwtClaims {
-    pub sub: String, // user_id
+    pub id: String, // user_id
+    pub sub: String,
     pub role: String,
     pub exp: usize,
 }
@@ -44,6 +45,7 @@ pub fn create_jwt(
         + exp_seconds;
 
     let claims = JwtClaims {
+        id: user_id.to_string(),
         sub: user_id.to_string(),
         role: role.to_string(),
         exp: expiration,

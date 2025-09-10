@@ -16,9 +16,11 @@ pub struct RegisterRequest {
 }
 
 /// A struct to represent the response after successful login or registration.
+/// This is updated to include both an access token and a refresh token.
 #[derive(Debug, Serialize)]
 pub struct AuthResponse {
-    pub token: String,
+    pub access_token: String,
+    pub refresh_token: String,
     pub token_type: String,
 }
 
@@ -82,18 +84,29 @@ pub async fn register(
         (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
     })?;
 
-    // Create JWT for the new user
-    let token =
-        create_jwt(&user.id.unwrap().to_string(), &"Admin".to_owned(), 3600).map_err(|e| {
-            let error_response = AuthErrorResponse {
-                status: false,
-                message: format!("JWT token not created: {}", e),
-            };
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
-        })?;
+    // Get the user ID and store it to avoid ownership move errors
+    let user_id = user.id.unwrap().to_string();
+
+    // Create a new access token (1 hour) and a refresh token (30 days).
+    let access_token = create_jwt(&user_id, &"Admin".to_owned(), 3600).map_err(|e| {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: format!("Access token not created: {}", e),
+        };
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+    })?;
+
+    let refresh_token = create_jwt(&user_id, &"Admin".to_owned(), 2592000).map_err(|e| {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: format!("Refresh token not created: {}", e),
+        };
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+    })?;
 
     Ok(Json(AuthResponse {
-        token,
+        access_token,
+        refresh_token,
         token_type: "Bearer".to_owned(),
     }))
 }
@@ -141,18 +154,28 @@ pub async fn login(
             return Err((StatusCode::UNAUTHORIZED, Json(error_response)));
         }
 
-        // Create JWT for the logged-in user with role "Admin"
-        let token =
+        // Create a new access token and a new refresh token.
+        let access_token =
             create_jwt(&user_model.id.to_string(), &user_model.role, 3600).map_err(|e| {
                 let error_response = AuthErrorResponse {
                     status: false,
-                    message: format!("JWT token not created: {}", e),
+                    message: format!("Access token not created: {}", e),
+                };
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+            })?;
+
+        let refresh_token = create_jwt(&user_model.id.to_string(), &user_model.role, 2592000)
+            .map_err(|e| {
+                let error_response = AuthErrorResponse {
+                    status: false,
+                    message: format!("Refresh token not created: {}", e),
                 };
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
             })?;
 
         Ok(Json(AuthResponse {
-            token,
+            access_token,
+            refresh_token,
             token_type: "Bearer".to_owned(),
         }))
     } else {
@@ -163,29 +186,123 @@ pub async fn login(
         Err((StatusCode::UNAUTHORIZED, Json(error_response)))
     }
 }
+
 /// A struct to represent the request to logout.
 #[derive(Debug, Deserialize)]
 pub struct LogoutRequest {
     pub token: String,
 }
 
+/// A struct to represent a successful logout response.
+#[derive(Debug, Serialize)]
+pub struct LogoutResponse {
+    pub status: bool,
+    pub message: String,
+}
+
 /// Handles the user logout logic by blacklisting the token.
+/// This is the best practice for revoking JWTs before they expire.
 pub async fn logout(
     Json(payload): Json<LogoutRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<Json<LogoutResponse>, (StatusCode, Json<AuthErrorResponse>)> {
     // Decode the token to get its claims and expiration time
-    let token_data = verify_jwt(&payload.token)
-        .map_err(|e| (StatusCode::UNAUTHORIZED, format!("টোকেন অবৈধ: {}", e)))?;
+    let token_data = verify_jwt(&payload.token).map_err(|e| {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: format!("Invalid Token: {}", e),
+        };
+        (StatusCode::UNAUTHORIZED, Json(error_response))
+    })?;
 
     // Blacklist the token in Redis
     blacklist_token(&payload.token, token_data.claims.exp)
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("টোকেন ব্ল্যাকলিস্ট করতে ব্যর্থ: {}", e),
-            )
+            let error_response = AuthErrorResponse {
+                status: false,
+                message: format!("Token not blacklisted: {}", e),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
         })?;
 
-    Ok(StatusCode::OK)
+    Ok(Json(LogoutResponse {
+        status: true,
+        message: "Logout successful.".to_owned(),
+    }))
+}
+
+/// A struct to represent the refresh token request body.
+#[derive(Debug, Deserialize)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
+}
+
+/// Handles the token refresh logic.
+pub async fn refresh_token(
+    Json(payload): Json<RefreshTokenRequest>,
+) -> Result<Json<AuthResponse>, (StatusCode, Json<AuthErrorResponse>)> {
+    // 1. Verify the refresh token's validity.
+    let token_data = verify_jwt(&payload.refresh_token).map_err(|_| {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: "Invalid or expired refresh token.".to_string(),
+        };
+        (StatusCode::UNAUTHORIZED, Json(error_response))
+    })?;
+
+    // 2. Check if the token is blacklisted.
+    let is_blacklisted = crate::config::redis::key_exists(&payload.refresh_token)
+        .await
+        .map_err(|e| {
+            let error_response = AuthErrorResponse {
+                status: false,
+                message: format!("Failed to check token blacklist: {}", e),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+        })?;
+
+    if is_blacklisted {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: "Refresh token is blacklisted.".to_string(),
+        };
+        return Err((StatusCode::UNAUTHORIZED, Json(error_response)));
+    }
+
+    // 3. Blacklist the old refresh token to prevent reuse.
+    blacklist_token(&payload.refresh_token, token_data.claims.exp)
+        .await
+        .map_err(|e| {
+            let error_response = AuthErrorResponse {
+                status: false,
+                message: format!("Failed to blacklist old refresh token: {}", e),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+        })?;
+
+    // 4. Generate a new access token (1 hour) and a new refresh token (30 days).
+    let new_access_token = create_jwt(&token_data.claims.id, &token_data.claims.role, 3600)
+        .map_err(|e| {
+            let error_response = AuthErrorResponse {
+                status: false,
+                message: format!("Failed to create new access token: {}", e),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+        })?;
+
+    let new_refresh_token = create_jwt(&token_data.claims.id, &token_data.claims.role, 2592000)
+        .map_err(|e| {
+            let error_response = AuthErrorResponse {
+                status: false,
+                message: format!("Failed to create new refresh token: {}", e),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+        })?;
+
+    // 5. Return the new tokens.
+    Ok(Json(AuthResponse {
+        access_token: new_access_token,
+        refresh_token: new_refresh_token,
+        token_type: "Bearer".to_owned(),
+    }))
 }
