@@ -154,7 +154,7 @@ pub async fn register(
     })?;
 
     if let Err(e) = mailer
-        .send_email(&payload.email, "ইমেল যাচাই করুন", &email_body)
+        .send_email(&payload.email, "Verify your email address", &email_body)
         .await
     {
         // Log the error but do not return an error to the user, as the account was created successfully.

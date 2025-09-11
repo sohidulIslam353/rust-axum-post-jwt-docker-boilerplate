@@ -19,6 +19,7 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/axum_db
       REDIS_URL: "redis://:password@keydb:6379/"
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:${RABBITMQ_PORT}/
 
   db:
     image: postgres:15
@@ -59,6 +60,20 @@ services:
     environment:
       - KEYDB_PASSWORD=password
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: axum_rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+    ports:
+      - "${RABBITMQ_PORT}:5672" # RabbitMQ service
+      - "${RABBITMQ_MANAGEMENT_PORT}:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
 volumes:
   db_data:
   keydb_data:
+  rabbitmq_data:

@@ -2,8 +2,6 @@ use anyhow::{Result, anyhow};
 use lettre::transport::smtp::{AsyncSmtpTransport, authentication::Credentials};
 use lettre::{AsyncTransport, Message, Tokio1Executor};
 
-use dotenvy::dotenv;
-
 /// email sending client
 pub struct EmailSender {
     mailer: AsyncSmtpTransport<Tokio1Executor>,
@@ -13,12 +11,6 @@ pub struct EmailSender {
 impl EmailSender {
     /// SMTP credentials initialize
     pub fn new() -> Result<Self> {
-        dotenv().ok();
-        println!("MAIL_HOST = {:?}", std::env::var("MAIL_HOST"));
-        println!("MAIL_PORT = {:?}", std::env::var("MAIL_PORT"));
-        println!("MAIL_USERNAME = {:?}", std::env::var("MAIL_USERNAME"));
-        println!("MAIL_PASSWORD = {:?}", std::env::var("MAIL_PASSWORD"));
-        println!("MAIL_FROM = {:?}", std::env::var("MAIL_FROM"));
         let smtp_host = std::env::var("MAIL_HOST")?;
         let smtp_port: u16 = std::env::var("MAIL_PORT")?.parse()?;
         let smtp_user = std::env::var("MAIL_USERNAME")?;
