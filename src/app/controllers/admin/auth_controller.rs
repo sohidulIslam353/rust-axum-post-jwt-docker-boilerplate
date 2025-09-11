@@ -1,11 +1,20 @@
-use axum::{Extension, Json, http::StatusCode};
+use anyhow::Result;
+use axum::{
+    Json,
+    extract::{Extension, Path},
+    http::StatusCode,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
 
 use crate::config::blacklist::blacklist_token;
-use crate::config::jwt::{create_jwt, verify_jwt};
+use crate::config::jwt::{
+    create_email_verification_jwt, create_jwt, verify_email_verification_jwt, verify_jwt,
+};
+use crate::config::mail::EmailSender;
 use crate::models::{user, user::Entity as User};
 use bcrypt::verify;
+use chrono::Utc;
 
 /// A struct to represent the user registration request body.
 #[derive(Debug, Deserialize)]
@@ -27,6 +36,13 @@ pub struct AuthResponse {
 /// A struct to represent a custom error response.
 #[derive(Debug, Serialize)]
 pub struct AuthErrorResponse {
+    pub status: bool,
+    pub message: String,
+}
+
+/// A struct to represent a successful verification response.
+#[derive(Debug, Serialize)]
+pub struct VerifyResponse {
     pub status: bool,
     pub message: String,
 }
@@ -69,9 +85,10 @@ pub async fn register(
     // Create a new user active model with role "Admin"
     let new_user = user::ActiveModel {
         name: Set(payload.name),
-        email: Set(payload.email),
+        email: Set(payload.email.clone()),
         password: Set(hashed_password),
         role: Set("Admin".to_owned()),
+        // `email_verified_at` is set to null by default
         ..Default::default()
     };
 
@@ -103,6 +120,46 @@ pub async fn register(
         };
         (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
     })?;
+
+    // Create a verification token and send the email
+    let verification_token = create_email_verification_jwt(&user_id, 86400).map_err(|e| {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: format!("Verification token not created: {}", e),
+        };
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+    })?;
+
+    let verification_link = format!(
+        "http://localhost:8080/admin/verify-email/{}",
+        verification_token
+    ); // `DOMAIN` environment variable ব্যবহার করা উচিত
+    let email_body = format!(
+        "<html>
+            <body>
+                <h1>ইমেল যাচাই করুন</h1>
+                <p>আপনার অ্যাকাউন্ট যাচাই করতে নিচের লিংকে ক্লিক করুন:</p>
+                <a href=\"{}\">ইমেল যাচাই করুন</a>
+                <p>যদি আপনি এই অনুরোধটি না করে থাকেন, তবে এই ইমেলটি উপেক্ষা করুন।</p>
+            </body>
+        </html>",
+        verification_link
+    );
+    let mailer = EmailSender::new().map_err(|e| {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: format!("Failed to create email sender: {}", e),
+        };
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+    })?;
+
+    if let Err(e) = mailer
+        .send_email(&payload.email, "ইমেল যাচাই করুন", &email_body)
+        .await
+    {
+        // Log the error but do not return an error to the user, as the account was created successfully.
+        eprintln!("Failed to send verification email: {}", e);
+    }
 
     Ok(Json(AuthResponse {
         access_token,
@@ -304,5 +361,75 @@ pub async fn refresh_token(
         access_token: new_access_token,
         refresh_token: new_refresh_token,
         token_type: "Bearer".to_owned(),
+    }))
+}
+
+/// Handles the email verification logic.
+pub async fn verify_email(
+    Extension(db): Extension<DatabaseConnection>,
+    Path(token): Path<String>,
+) -> Result<Json<VerifyResponse>, (StatusCode, Json<AuthErrorResponse>)> {
+    // 1️⃣ Verify token and get claims
+    let token_data = verify_email_verification_jwt(&token).map_err(|e| {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: format!("Invalid or expired verification token: {}", e),
+        };
+        (StatusCode::BAD_REQUEST, Json(error_response))
+    })?;
+
+    // 2️⃣ Convert string user_id to i32 (DB id)
+    let user_id: i32 = token_data.claims.id.parse().map_err(|_| {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: "Invalid user ID in token.".to_string(),
+        };
+        (StatusCode::BAD_REQUEST, Json(error_response))
+    })?;
+
+    // 3️⃣ Fetch user from DB
+    let user_model = User::find_by_id(user_id).one(&db).await.map_err(|e| {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: format!("Database error: {}", e),
+        };
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+    })?;
+
+    let user_model = match user_model {
+        Some(u) => u,
+        None => {
+            let error_response = AuthErrorResponse {
+                status: false,
+                message: "User not found.".to_string(),
+            };
+            return Err((StatusCode::NOT_FOUND, Json(error_response)));
+        }
+    };
+
+    // 4️⃣ Check if already verified
+    if user_model.email_verified_at.is_some() {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: "Email is already verified.".to_string(),
+        };
+        return Err((StatusCode::BAD_REQUEST, Json(error_response)));
+    }
+
+    // 5️⃣ Update email_verified_at
+    let mut user_active_model: user::ActiveModel = user_model.into();
+    user_active_model.email_verified_at = Set(Some(Utc::now().naive_utc()));
+    user_active_model.save(&db).await.map_err(|e| {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: format!("Failed to update email verification status: {}", e),
+        };
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+    })?;
+
+    // 6️⃣ Success response
+    Ok(Json(VerifyResponse {
+        status: true,
+        message: "Email successfully verified.".to_owned(),
     }))
 }

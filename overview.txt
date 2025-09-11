@@ -1,0 +1,30 @@
+Axum-based API Backend
+This project is a robust and scalable API backend built with the Axum web framework in Rust. It follows a clean, modular architecture with a focus on security, maintainability, and clear separation of concerns.
+
+Project Structure Overview
+Core Application Files
+main.rs: The application's entry point. It initializes all core components, including the database, Redis cache, JWT keys, and the main application router.
+
+routes/admin.rs: Defines all the API endpoints for the admin panel. It uses a tiered middleware approach to handle guest, authenticated, and role-specific access.
+
+Configuration & Utilities
+config/auth_bearer.rs: A custom Axum extractor that automatically validates JWT tokens from the Authorization header and extracts the user's claims. This simplifies handler functions by offloading token validation logic.
+
+config/blacklist.rs: Contains the logic for blacklisting JWT tokens in Redis. This is a critical security feature for handling user logouts and token invalidation.
+
+config/database.rs: Manages the connection to the database using SeaORM. It provides a clean function to establish the database connection.
+
+config/jwt.rs: Handles the creation and verification of JSON Web Tokens (JWTs). It uses environment variables for the secret key to ensure security.
+
+config/mail.rs: A utility for sending emails asynchronously using the lettre crate. This can be used for features like user registration or password resets.
+
+config/redis.rs: Manages the connection and provides helper functions for interacting with the Redis/KeyDB cache. This is used for token blacklisting and other caching needs.
+
+Middleware
+middleware/admin_auth_middleware.rs: A middleware that protects admin-specific routes. It verifies that a user has a valid JWT with the "Admin" role.
+
+middleware/admin_guest_middleware.rs: Prevents authenticated admin users from accessing guest-only routes (e.g., login, register).
+
+middleware/customer_auth_middleware.rs: Protects customer-specific routes by verifying a valid JWT with the "User" role.
+
+middleware/customer_guest_middleware.rs: Prevents authenticated customer users from accessing guest-only routes

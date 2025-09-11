@@ -1,15 +1,44 @@
-use anyhow::Result;
-use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
+use crate::config::blacklist::is_blacklisted;
+use crate::config::jwt::verify_jwt;
+use axum::{Json, extract::Request, http::StatusCode, middleware::Next, response::Response};
+use serde::Serialize;
 
-/// Middleware to check if a customer is already logged in and prevent them from
-/// accessing certain routes like login and register.
+/// A custom error response for the authentication middleware.
+#[derive(Debug, Serialize)]
+pub struct AuthErrorResponse {
+    pub status: bool,
+    pub message: String,
+}
+
+/// Middleware to prevent authenticated customers from accessing guest routes like login or register.
 #[allow(dead_code)]
-pub async fn customer_guest_middleware(req: Request, next: Next) -> Result<Response, StatusCode> {
-    // Check if the request contains an "Authorization" header.
-    if req.headers().contains_key("Authorization") {
-        return Err(StatusCode::FORBIDDEN);
+pub async fn customer_guest_middleware(
+    req: Request,
+    next: Next,
+) -> Result<Response, (StatusCode, Json<AuthErrorResponse>)> {
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|header| header.to_str().ok());
+
+    if let Some(header) = auth_header {
+        if header.starts_with("Bearer ") {
+            let token_string = header.trim_start_matches("Bearer ").to_string();
+
+            // Check if the token is valid and not blacklisted
+            let is_valid_token = verify_jwt(&token_string).is_ok();
+            let is_token_blacklisted = is_blacklisted(&token_string).await.unwrap_or(false);
+
+            if is_valid_token && !is_token_blacklisted {
+                let error_response = AuthErrorResponse {
+                    status: false,
+                    message: "Access denied. You are already logged in.".to_owned(),
+                };
+                return Err((StatusCode::FORBIDDEN, Json(error_response)));
+            }
+        }
     }
 
-    // If no authorization header, proceed to the next middleware or handler.
+    // If no valid token is found, proceed to the next middleware or handler.
     Ok(next.run(req).await)
 }

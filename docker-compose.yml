@@ -10,10 +10,9 @@ services:
       - ./src:/usr/src/app/src
       - ./Cargo.toml:/usr/src/app/Cargo.toml
       - ./Cargo.lock:/usr/src/app/Cargo.lock
+      - ./.env:/usr/src/app/.env
     ports:
       - "8080:8080"
-    env_file:
-      - ./.env
     depends_on:
       - db
       - keydb

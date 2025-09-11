@@ -9,12 +9,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 static ENCODING_KEY: OnceCell<EncodingKey> = OnceCell::new();
 static DECODING_KEY: OnceCell<DecodingKey> = OnceCell::new();
 
-/// JWT claims struct
+/// JWT claims struct for login / access tokens
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JwtClaims {
     pub id: String, // user_id
     pub sub: String,
     pub role: String,
+    pub exp: usize,
+}
+
+/// JWT claims struct for email verification
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EmailVerificationClaims {
+    pub id: String,
     pub exp: usize,
 }
 
@@ -31,8 +38,7 @@ pub fn init_keys() -> Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
-/// Creates a new JWT with a user ID, role, and expiration time.
+/// Creates a new login JWT with a user ID, role, and expiration time.
 pub fn create_jwt(
     user_id: &str,
     role: &str,
@@ -58,12 +64,45 @@ pub fn create_jwt(
     encode(&Header::default(), &claims, encoding_key)
 }
 
-#[allow(dead_code)]
-/// Verifies a JWT and returns the claims.
+/// Verifies a login JWT and returns the claims.
 pub fn verify_jwt(token: &str) -> Result<TokenData<JwtClaims>, jsonwebtoken::errors::Error> {
     let decoding_key = DECODING_KEY
         .get()
         .expect("JWT keys not initialized. Call init_keys() first.");
 
     decode::<JwtClaims>(token, decoding_key, &Validation::default())
+}
+
+/// Creates a JWT specifically for email verification
+pub fn create_email_verification_jwt(
+    user_id: &str,
+    exp_seconds: usize,
+) -> Result<String, jsonwebtoken::errors::Error> {
+    let expiration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as usize
+        + exp_seconds;
+
+    let claims = EmailVerificationClaims {
+        id: user_id.to_string(),
+        exp: expiration,
+    };
+
+    let encoding_key = ENCODING_KEY
+        .get()
+        .expect("JWT keys not initialized. Call init_keys() first.");
+
+    encode(&Header::default(), &claims, encoding_key)
+}
+
+/// Verifies an email verification JWT and returns the claims.
+pub fn verify_email_verification_jwt(
+    token: &str,
+) -> Result<TokenData<EmailVerificationClaims>, jsonwebtoken::errors::Error> {
+    let decoding_key = DECODING_KEY
+        .get()
+        .expect("JWT keys not initialized. Call init_keys() first.");
+
+    decode::<EmailVerificationClaims>(token, decoding_key, &Validation::default())
 }

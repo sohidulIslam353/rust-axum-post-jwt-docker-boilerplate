@@ -44,3 +44,4 @@ validator = { version = "0.16", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 anyhow = "1.0.99"
+lettre = { version = "0.11", features = ["builder", "tokio1-native-tls"] }

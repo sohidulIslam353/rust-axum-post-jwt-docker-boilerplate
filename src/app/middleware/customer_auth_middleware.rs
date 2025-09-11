@@ -1,56 +1,67 @@
-use crate::config::jwt::verify_jwt;
-use anyhow::Result;
-use axum::{Json, extract::Request, http::StatusCode, middleware::Next, response::Response};
-use serde::Serialize;
+use crate::{
+    app::controllers::admin::auth_controller::AuthErrorResponse, // controller's error type
+    config::{
+        auth_bearer::{AuthBearer, AuthErrorResponse as BearerAuthError}, // alias the bearer error
+        blacklist::is_blacklisted,
+    },
+};
+use axum::{
+    Json,
+    extract::FromRequestParts,
+    http::{Request, StatusCode},
+    middleware::Next,
+    response::Response,
+};
 
-/// A custom error response for the authentication middleware.
-#[derive(Debug, Serialize)]
-pub struct AuthErrorResponse {
-    pub status: bool,
-    pub message: String,
-}
-
-#[allow(dead_code)]
 /// Middleware to protect customer routes.
-/// It checks if the bearer token is valid and if the user's role is "User".
+/// It checks if the bearer token is valid, not blacklisted, and if the user's role is "User".
+#[allow(dead_code)]
 pub async fn customer_auth_middleware(
-    req: Request,
+    req: Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<AuthErrorResponse>)> {
-    let auth_header = req
-        .headers()
-        .get("Authorization")
-        .and_then(|header| header.to_str().ok());
+    // split request into parts + body
+    let (mut parts, body) = req.into_parts();
 
-    let token_string = if let Some(header) = auth_header {
-        if header.starts_with("Bearer ") {
-            header.trim_start_matches("Bearer ").to_string()
-        } else {
-            let error_response = AuthErrorResponse {
-                status: false,
-                message: "Invalid token format. Bearer token expected.".to_owned(),
+    // call extractor but DON'T use `?` — map the Err from bearer->controller error
+    let auth_bearer = match AuthBearer::from_request_parts(&mut parts, &()).await {
+        Ok(ab) => ab,
+        Err((status, json)) => {
+            // json: axum::Json<BearerAuthError>
+            let be: BearerAuthError = json.0;
+
+            // convert to controller's AuthErrorResponse
+            let converted = AuthErrorResponse {
+                status: be.status,
+                message: be.message,
             };
-            return Err((StatusCode::UNAUTHORIZED, Json(error_response)));
+
+            return Err((status, Json(converted)));
         }
-    } else {
-        let error_response = AuthErrorResponse {
-            status: false,
-            message: "Authorization header missing.".to_owned(),
-        };
-        return Err((StatusCode::UNAUTHORIZED, Json(error_response)));
     };
 
-    // Verify the token and get the claims
-    let token_data = verify_jwt(&token_string).map_err(|e| {
+    // rebuild request for downstream handlers
+    let req = Request::from_parts(parts, body);
+
+    let claims = auth_bearer.0;
+
+    // Check if the token is blacklisted
+    if is_blacklisted(&claims.sub).await.map_err(|e| {
         let error_response = AuthErrorResponse {
             status: false,
-            message: format!("Invalid or expired token: {}", e),
+            message: format!("Failed to check token blacklist: {}", e),
         };
-        (StatusCode::UNAUTHORIZED, Json(error_response))
-    })?;
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+    })? {
+        let error_response = AuthErrorResponse {
+            status: false,
+            message: "This token has been blacklisted.".to_owned(),
+        };
+        return Err((StatusCode::UNAUTHORIZED, Json(error_response)));
+    }
 
     // Check if the user's role is "User"
-    if token_data.claims.role != "User" {
+    if claims.role != "User" {
         let error_response = AuthErrorResponse {
             status: false,
             message: "Access denied. Only customers can view this page.".to_owned(),
