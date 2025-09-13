@@ -1,8 +1,8 @@
 [package]
 name = "axum_seaorm_app"
 version = "0.1.0"
-edition = "2024"  
-
+edition = "2024"
+default-run = "axum_seaorm_app"
 
 [dependencies]
 # Web framework
@@ -29,7 +29,7 @@ sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres"] }
 dotenvy = "0.15"
 
 # Date/Time
-chrono = { version = "0.4", features = ["serde"] }   # add "serde" for Claims serialization
+chrono = { version = "0.4", features = ["serde"] } 
 
 # Redis / KeyDB
 redis = { version = "0.24", features = ["tokio-comp"] }
@@ -45,3 +45,10 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 anyhow = "1.0.99"
 lettre = { version = "0.11", features = ["builder", "tokio1-native-tls"] }
+# RabbitMQ client for Rust
+lapin = "2"
+futures-util = "0.3"
+thiserror = "1.0"
+
+
+

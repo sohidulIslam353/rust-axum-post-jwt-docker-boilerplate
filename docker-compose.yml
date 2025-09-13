@@ -19,7 +19,7 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/axum_db
       REDIS_URL: "redis://:password@keydb:6379/"
-      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:${RABBITMQ_PORT}/
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:${RABBITMQ_PORT}/%2f
 
   db:
     image: postgres:15
@@ -72,6 +72,28 @@ services:
       - "${RABBITMQ_MANAGEMENT_PORT}:15672" # Management UI
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+
+  # All workers loaded
+  email_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src:/usr/src/app/src
+      - ./Cargo.toml:/usr/src/app/Cargo.toml
+      - ./Cargo.lock:/usr/src/app/Cargo.lock
+      - ./.env:/usr/src/app/.env
+    command: cargo run --bin email_worker
+    depends_on:
+      - rabbitmq
+    environment:
+      - RABBITMQ_USER=${RABBITMQ_USER}
+      - RABBITMQ_PASS=${RABBITMQ_PASS}
+      - RABBITMQ_PORT=${RABBITMQ_PORT}
+      - MAIL_HOST=${MAIL_HOST}
+      - MAIL_USERNAME=${MAIL_USERNAME}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - MAIL_PORT=${MAIL_PORT}
 
 volumes:
   db_data:

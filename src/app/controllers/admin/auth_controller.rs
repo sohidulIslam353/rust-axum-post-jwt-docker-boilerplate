@@ -11,8 +11,11 @@ use crate::config::blacklist::blacklist_token;
 use crate::config::jwt::{
     create_email_verification_jwt, create_jwt, verify_email_verification_jwt, verify_jwt,
 };
-use crate::config::mail::EmailSender;
+// use crate::config::mail::EmailSender;
+use crate::config::rabbitmq::EmailJob;
+use crate::config::rabbitmq::publish_to_queue; // Import publish_to_queue
 use crate::models::{user, user::Entity as User};
+
 use bcrypt::verify;
 use chrono::Utc;
 
@@ -96,19 +99,19 @@ pub async fn register(
     let user = new_user.save(&db).await.map_err(|e| {
         let error_response = AuthErrorResponse {
             status: false,
-            message: format!("has an issue to insert data into database: {}", e),
+            message: format!("Database issue: {}", e),
         };
         (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
     })?;
 
-    // Get the user ID and store it to avoid ownership move errors
+    // Get the user ID
     let user_id = user.id.unwrap().to_string();
 
-    // Create a new access token (1 hour) and a refresh token (30 days).
+    // Create JWT tokens (access and refresh)
     let access_token = create_jwt(&user_id, &"Admin".to_owned(), 3600).map_err(|e| {
         let error_response = AuthErrorResponse {
             status: false,
-            message: format!("Access token not created: {}", e),
+            message: format!("Access token creation failed: {}", e),
         };
         (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
     })?;
@@ -116,16 +119,16 @@ pub async fn register(
     let refresh_token = create_jwt(&user_id, &"Admin".to_owned(), 2592000).map_err(|e| {
         let error_response = AuthErrorResponse {
             status: false,
-            message: format!("Refresh token not created: {}", e),
+            message: format!("Refresh token creation failed: {}", e),
         };
         (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
     })?;
 
-    // Create a verification token and send the email
+    // Create a verification token and send it to RabbitMQ
     let verification_token = create_email_verification_jwt(&user_id, 86400).map_err(|e| {
         let error_response = AuthErrorResponse {
             status: false,
-            message: format!("Verification token not created: {}", e),
+            message: format!("Verification token creation failed: {}", e),
         };
         (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
     })?;
@@ -133,41 +136,36 @@ pub async fn register(
     let verification_link = format!(
         "http://localhost:8080/admin/verify-email/{}",
         verification_token
-    ); // `DOMAIN` environment variable ব্যবহার করা উচিত
-    let email_body = format!(
-        "<html>
-            <body>
-                <h1>ইমেল যাচাই করুন</h1>
-                <p>আপনার অ্যাকাউন্ট যাচাই করতে নিচের লিংকে ক্লিক করুন:</p>
-                <a href=\"{}\">ইমেল যাচাই করুন</a>
-                <p>যদি আপনি এই অনুরোধটি না করে থাকেন, তবে এই ইমেলটি উপেক্ষা করুন।</p>
-            </body>
-        </html>",
-        verification_link
     );
-    let mailer = EmailSender::new().map_err(|e| {
-        let error_response = AuthErrorResponse {
-            status: false,
-            message: format!("Failed to create email sender: {}", e),
-        };
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
-    })?;
 
-    if let Err(e) = mailer
-        .send_email(&payload.email, "Verify your email address", &email_body)
+    // Create the email task (email job) to be processed in the background
+    let email_task = EmailJob {
+        to: payload.email.clone(),
+        subject: "Verify your email address".to_string(),
+        body: format!(
+            "<html><body><h1>ইমেল যাচাই করুন</h1><p>আপনার অ্যাকাউন্ট যাচাই করতে নিচের লিংকে ক্লিক করুন:</p><a href=\"{}\">ইমেল যাচাই করুন</a></body></html>",
+            verification_link
+        ),
+    };
+
+    // Publish the email task to the RabbitMQ queue
+    publish_to_queue(&email_task, "email_queue")
         .await
-    {
-        // Log the error but do not return an error to the user, as the account was created successfully.
-        eprintln!("Failed to send verification email: {}", e);
-    }
+        .map_err(|e| {
+            let error_response = AuthErrorResponse {
+                status: false,
+                message: format!("Failed to send email task to RabbitMQ: {}", e),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+        })?;
 
+    // Return the authentication tokens
     Ok(Json(AuthResponse {
         access_token,
         refresh_token,
         token_type: "Bearer".to_owned(),
     }))
 }
-
 /// A struct to represent the user login request body.
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
@@ -369,7 +367,7 @@ pub async fn verify_email(
     Extension(db): Extension<DatabaseConnection>,
     Path(token): Path<String>,
 ) -> Result<Json<VerifyResponse>, (StatusCode, Json<AuthErrorResponse>)> {
-    // 1️⃣ Verify token and get claims
+    //  Verify token and get claims
     let token_data = verify_email_verification_jwt(&token).map_err(|e| {
         let error_response = AuthErrorResponse {
             status: false,
@@ -378,7 +376,7 @@ pub async fn verify_email(
         (StatusCode::BAD_REQUEST, Json(error_response))
     })?;
 
-    // 2️⃣ Convert string user_id to i32 (DB id)
+    //  Convert string user_id to i32 (DB id)
     let user_id: i32 = token_data.claims.id.parse().map_err(|_| {
         let error_response = AuthErrorResponse {
             status: false,
@@ -387,7 +385,7 @@ pub async fn verify_email(
         (StatusCode::BAD_REQUEST, Json(error_response))
     })?;
 
-    // 3️⃣ Fetch user from DB
+    //  Fetch user from DB
     let user_model = User::find_by_id(user_id).one(&db).await.map_err(|e| {
         let error_response = AuthErrorResponse {
             status: false,
@@ -407,7 +405,7 @@ pub async fn verify_email(
         }
     };
 
-    // 4️⃣ Check if already verified
+    //  Check if already verified
     if user_model.email_verified_at.is_some() {
         let error_response = AuthErrorResponse {
             status: false,
@@ -416,7 +414,7 @@ pub async fn verify_email(
         return Err((StatusCode::BAD_REQUEST, Json(error_response)));
     }
 
-    // 5️⃣ Update email_verified_at
+    //  Update email_verified_at
     let mut user_active_model: user::ActiveModel = user_model.into();
     user_active_model.email_verified_at = Set(Some(Utc::now().naive_utc()));
     user_active_model.save(&db).await.map_err(|e| {
@@ -427,7 +425,7 @@ pub async fn verify_email(
         (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
     })?;
 
-    // 6️⃣ Success response
+    //  Success response
     Ok(Json(VerifyResponse {
         status: true,
         message: "Email successfully verified.".to_owned(),

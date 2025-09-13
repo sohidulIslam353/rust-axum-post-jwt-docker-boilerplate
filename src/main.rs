@@ -1,3 +1,4 @@
+pub mod errors;
 use axum::Extension;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -6,6 +7,7 @@ mod app;
 mod config;
 mod models;
 mod routes;
+mod utils;
 
 use config::{database, redis};
 use dotenvy::dotenv;
