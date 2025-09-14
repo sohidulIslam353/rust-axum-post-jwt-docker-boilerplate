@@ -18,6 +18,7 @@ use crate::models::{user, user::Entity as User};
 
 use bcrypt::verify;
 use chrono::Utc;
+use tracing::{error, info};
 
 /// A struct to represent the user registration request body.
 #[derive(Debug, Deserialize)]
@@ -73,6 +74,10 @@ pub async fn register(
             status: false,
             message: "Email already exists.".to_string(),
         };
+        error!(
+            "Registration failed: Email already exists for user: {}",
+            payload.email
+        );
         return Err((StatusCode::CONFLICT, Json(error_response)));
     }
 
@@ -158,7 +163,7 @@ pub async fn register(
             };
             (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
         })?;
-
+    info!("Verification email send to: {}", payload.email);
     // Return the authentication tokens
     Ok(Json(AuthResponse {
         access_token,

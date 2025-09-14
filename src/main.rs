@@ -11,13 +11,11 @@ mod utils;
 
 use config::{database, redis};
 use dotenvy::dotenv;
-
 #[tokio::main]
 async fn main() {
     // Load environment variables from .env file
     dotenv().ok();
     config::jwt::init_keys().expect("Failed to initialize JWT keys");
-
     // Connect to database
     let db = database::connect_db()
         .await

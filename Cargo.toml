@@ -41,8 +41,12 @@ argon2 = "0.5"
 uuid = { version = "1", features = ["v4"] }
 bcrypt = "0.15" 
 validator = { version = "0.16", features = ["derive"] }
+
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-log = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
 anyhow = "1.0.99"
 lettre = { version = "0.11", features = ["builder", "tokio1-native-tls"] }
 # RabbitMQ client for Rust

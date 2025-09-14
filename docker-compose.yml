@@ -16,11 +16,13 @@ services:
     depends_on:
       - db
       - keydb
+      - rabbitmq
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/axum_db
       REDIS_URL: "redis://:password@keydb:6379/"
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:${RABBITMQ_PORT}/%2f
 
+  # database (Postgresql)
   db:
     image: postgres:15
     container_name: axum_db
@@ -49,6 +51,7 @@ services:
       DATABASE_URL: postgres://postgres:postgres@db:5432/axum_db
     command: sh -c "sea-orm-cli migrate up --migration-dir ./migration"
 
+  # keydb (Caching management)
   keydb:
     image: eqalpha/keydb:latest
     container_name: axum_keydb
@@ -60,6 +63,7 @@ services:
     environment:
       - KEYDB_PASSWORD=password
 
+  # rabbitmq (play with events)
   rabbitmq:
     image: rabbitmq:3-management
     container_name: axum_rabbitmq
